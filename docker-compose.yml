@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgis/postgis:latest
+    container_name: db
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    ports:
+      - 8888:5432
+    volumes:
+      - ./create_db.sql:/docker-entrypoint-initdb.d/create_db.sql
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.26.0
+    container_name: geoserver
+    volumes:
+      - "./geoserver_data:/opt/geoserver_data"
+    ports:
+      - 8484:8080
