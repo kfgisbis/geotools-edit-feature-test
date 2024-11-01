@@ -1,20 +1,26 @@
 # Problems changing Feature
 
 ### RUN
-```
-docker compose up -d
-```
 
-and run GeotoolsEditFeatureTestApplication.class
+```
+docker compose up -d && docker-compose logs -f app-test
+```
 
 ### INSERT FEATURE
 
-It is not clear how to set the user identifier. Setting the parameter idgen="UseExisting" 
+I have the table with UUID key and want use for them UUID 7 version that have two good thing - sequentiality and storing creating record datetime
+
+There are three way for it - use key from database, set default UUID generation in geoserver and use parameter idgen for wfs-t insert transaction
+First variant do not implements in geoserver, second also.
+Last variant is good choice, but not working when I try to call it from my app use geotools library
+
+It is not clear how to set the user identifier. Setting the parameter idgen="UseExisting"
 is possible only in objects of the InsertElementTypeImpl type.
 
 feature.getUserData().put(Hints.USE_PROVIDED_FID, Boolean.TRUE); - does not work
 
 This was achieved only by overriding the Strategy createInsert method and adding the line:
+
 ```
  insert.setIdgen(IdentifierGenerationOptionType.USE_EXISTING_LITERAL);
 ```
@@ -37,17 +43,20 @@ protected InsertElementType createInsert(WfsFactory factory, TransactionRequest.
 ```
 
 ### UPDATE FEATURE
+
+Also I try update feature geometry in geoserver using geotools library in my application, but was not success
+
 ```java
-public static boolean updateGeometry(Geometry geometry, String sid) {
+public static boolean updateGeometry(String typeName, Geometry geometry, String sid, String wfsVersion) {
     try {
-        WFSDataStore dataStore = getDataStore();
-
-        SimpleFeatureType sft = dataStore.getSchema(TYPE_NAME);
-
+        WFSDataStore dataStore = getDataStore(wfsVersion);
+    
+        SimpleFeatureType sft = dataStore.getSchema(typeName);
+    
         QName qName = dataStore.getRemoteTypeName(sft.getName());
         String geomColumn = getGeomColumn(dataStore, qName);
         Filter idFilter = ff.id(ff.featureId(sid));
-
+    
         return updateTransaction(dataStore, qName, List.of(new QName(geomColumn)), List.of(geometry), idFilter);
     } catch (IOException e) {
         e.printStackTrace();
@@ -62,15 +71,25 @@ private static boolean updateTransaction(WFSDataStore dataStore, QName qName, Li
 
     return transaction(dataStore, transactionRequest, TransactionResponse::getUpdatedCount) > 0;
 }
+
+public static <T> T transaction(WFSDataStore dataStore, TransactionRequest transactionRequest, Function<TransactionResponse, T> action) throws IOException {
+    TransactionResponse response =
+        dataStore
+            .getWfsClient()
+            .issueTransaction(transactionRequest);
+    
+    return action.apply(response);
+}
 ```
 
 #### WFS 1.1.0
-When using WFS 1.1.0, the request is sent and updates are performed. 
-The response comes that the line has been updated, but POLYGON EMPTY 
+When using WFS 1.1.0, the request is sent and updates are performed.
+The response comes that the line has been updated, but POLYGON EMPTY
 is saved in the geometry field
 
 #### WFS 2.0.0
 REQUEST:
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <wfs:Transaction 
@@ -106,6 +125,7 @@ REQUEST:
 ```
 
 A response comes from the geoserver:
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?><ows:ExceptionReport xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0.0" xsi:schemaLocation="http://www.opengis.net/ows/1.1 http://localhost:8484/geoserver/schemas/ows/1.1.0/owsAll.xsd">
   <ows:Exception exceptionCode="InvalidValue" locator="geometry">

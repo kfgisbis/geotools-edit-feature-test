@@ -20,70 +20,43 @@ import org.locationtech.jts.geom.Geometry;
 
 import javax.xml.namespace.QName;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Function;
 
 public class GeotoolsUtils {
     private final static FilterFactory ff = CommonFactoryFinder.getFilterFactory();
-    private final static String TYPE_NAME = "bis:test";
-    public static WFSDataStore getDataStore() throws IOException {
-        Map<String, Object> params = new HashMap<>();
-        params.put(WFSDataStoreFactory.URL.getName(), "http://localhost:8484/geoserver/ows?service=wfs&REQUEST=GetCapabilities&version=2.0.0");
-        params.put(WFSDataStoreFactory.PASSWORD.getName(), "geoserver");
-        params.put(WFSDataStoreFactory.USERNAME.getName(), "admin");
 
+    public static WFSDataStore getDataStore(String version) throws IOException {
+        String url = "http://geoserver:8080/geoserver/ows?service=wfs&request=GetCapabilities&version=" + version;
+
+        Map<String, Object> params = Map.of(
+                WFSDataStoreFactory.URL.getName(), url,
+                WFSDataStoreFactory.PASSWORD.getName(), "geoserver",
+                WFSDataStoreFactory.USERNAME.getName(), "admin"
+        );
         return new WFSDataStoreFactory().createDataStore(params);
     }
 
-    public static boolean updateGeometry(Geometry geometry, String sid) {
+    public static FeatureId createGeometry(String typeName, Geometry geometry, String newId, String wfsVersion) {
         try {
-            WFSDataStore dataStore = getDataStore();
-
-            SimpleFeatureType sft = dataStore.getSchema(TYPE_NAME);
-
+            WFSDataStore dataStore = getDataStore(wfsVersion);
+            SimpleFeatureType sft = dataStore.getSchema(typeName);
             QName qName = dataStore.getRemoteTypeName(sft.getName());
-            String geomColumn = getGeomColumn(dataStore, qName);
-            Filter idFilter = ff.id(ff.featureId(sid));
-
-            return updateTransaction(dataStore, qName, List.of(new QName(geomColumn)), List.of(geometry), idFilter);
-        } catch (IOException e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static boolean updateTransaction(WFSDataStore dataStore, QName qName, List<QName> columns, List<Object> values, Filter filter) throws IOException {
-        TransactionRequest transactionRequest = dataStore.getWfsClient().createTransaction();
-        TransactionRequest.Update update = transactionRequest.createUpdate(qName, columns, values, filter);
-        transactionRequest.add(update);
-
-        return transaction(dataStore, transactionRequest, TransactionResponse::getUpdatedCount) > 0;
-    }
-
-    public static FeatureId createGeometry(Geometry geometry, UUID newId) {
-        try {
-            WFSDataStore dataStore = getDataStore();
-            SimpleFeatureType sft = dataStore.getSchema(TYPE_NAME);
-            QName qName = dataStore.getRemoteTypeName(sft.getName());
-
-            var crs = sft.getCoordinateReferenceSystem();
 
             String geomColumn = getGeomColumn(dataStore, qName);
 
-            SimpleFeatureTypeBuilder typeBuilder = getFeatureTypeBuilder(qName, crs);
+            SimpleFeatureTypeBuilder typeBuilder = getFeatureTypeBuilder(qName, sft.getCoordinateReferenceSystem());
             typeBuilder.add(geomColumn, Geometry.class);
 
             SimpleFeatureBuilder featureBuilder = new SimpleFeatureBuilder(typeBuilder.buildFeatureType());
             featureBuilder.set(geomColumn, geometry);
             featureBuilder.featureUserData(Hints.USE_PROVIDED_FID, Boolean.TRUE);
-            featureBuilder.featureUserData(Hints.PROVIDED_FID, newId.toString());
+            featureBuilder.featureUserData(Hints.PROVIDED_FID, newId);
 
-            SimpleFeature feature = featureBuilder.buildFeature(newId.toString());
+            SimpleFeature feature = featureBuilder.buildFeature(newId);
             feature.getUserData().put(Hints.USE_PROVIDED_FID, Boolean.TRUE);
-            feature.getUserData().put(Hints.PROVIDED_FID, newId.toString());
+            feature.getUserData().put(Hints.PROVIDED_FID, newId);
 
             return insertTransaction(dataStore, feature, qName);
         } catch (Exception e) {
@@ -114,6 +87,31 @@ public class GeotoolsUtils {
                         .orElseThrow(() -> new RuntimeException("Can not extract identifier!"));
 
         return transaction(dataStore, transactionRequest, action);
+    }
+
+    public static boolean updateGeometry(String typeName, Geometry geometry, String sid, String wfsVersion) {
+        try {
+            WFSDataStore dataStore = getDataStore(wfsVersion);
+
+            SimpleFeatureType sft = dataStore.getSchema(typeName);
+
+            QName qName = dataStore.getRemoteTypeName(sft.getName());
+            String geomColumn = getGeomColumn(dataStore, qName);
+            Filter idFilter = ff.id(ff.featureId(sid));
+
+            return updateTransaction(dataStore, qName, List.of(new QName(geomColumn)), List.of(geometry), idFilter);
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static boolean updateTransaction(WFSDataStore dataStore, QName qName, List<QName> columns, List<Object> values, Filter filter) throws IOException {
+        TransactionRequest transactionRequest = dataStore.getWfsClient().createTransaction();
+        TransactionRequest.Update update = transactionRequest.createUpdate(qName, columns, values, filter);
+        transactionRequest.add(update);
+
+        return transaction(dataStore, transactionRequest, TransactionResponse::getUpdatedCount) > 0;
     }
 
     public static <T> T transaction(WFSDataStore dataStore, TransactionRequest transactionRequest, Function<TransactionResponse, T> action) throws IOException {
